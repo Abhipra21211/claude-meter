@@ -1,0 +1,91 @@
+package com.nish.claudemeter
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
+import android.os.Bundle
+import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+
+object Ua {
+    fun clean(u: String): String =
+        u.replace("; wv", "").replace(Regex("Version/\\d+\\.\\d+ "), "")
+}
+
+class MainActivity : Activity() {
+    private lateinit var web: WebView
+    private var chooser: ValueCallback<Array<Uri>>? = null
+    private var js = ""
+    private var hasDs = false
+
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(b: Bundle?) {
+        super.onCreate(b)
+        web = WebView(this)
+        setContentView(web, ViewGroup.LayoutParams(-1, -1))
+        web.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            mediaPlaybackRequiresUserGesture = false
+            userAgentString = Ua.clean(userAgentString)
+        }
+        CookieManager.getInstance().apply {
+            setAcceptCookie(true)
+            setAcceptThirdPartyCookies(web, true)
+        }
+        js = assets.open("shim.js").bufferedReader().use { it.readText() } + "\n" +
+            assets.open("counter.user.js").bufferedReader().use { it.readText() }
+        hasDs = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+        if (hasDs) WebViewCompat.addDocumentStartJavaScript(web, js, setOf("https://claude.ai"))
+        web.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
+                val s = r.url.scheme ?: return false
+                if (s == "http" || s == "https") return false
+                try { startActivity(Intent(Intent.ACTION_VIEW, r.url)) } catch (e: Exception) {}
+                return true
+            }
+            override fun onPageStarted(v: WebView, u: String, f: Bitmap?) {
+                if (!hasDs && u.startsWith("https://claude.ai")) v.evaluateJavascript(js, null)
+            }
+        }
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                w: WebView?, cb: ValueCallback<Array<Uri>>?, p: FileChooserParams?
+            ): Boolean {
+                if (cb == null || p == null) return false
+                chooser?.onReceiveValue(null)
+                chooser = cb
+                return try { startActivityForResult(p.createIntent(), 7); true }
+                catch (e: Exception) { chooser = null; false }
+            }
+        }
+        if (b == null) web.loadUrl("https://claude.ai")
+    }
+
+    override fun onActivityResult(req: Int, res: Int, d: Intent?) {
+        if (req == 7) {
+            chooser?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, d))
+            chooser = null
+        } else super.onActivityResult(req, res, d)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (web.canGoBack()) web.goBack() else super.onBackPressed()
+    }
+
+    override fun onPause() {
+        CookieManager.getInstance().flush()
+        super.onPause()
+    }
+}
