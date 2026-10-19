@@ -2,10 +2,13 @@ package com.nish.claudemeter
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
+import android.os.Message
 import android.view.Gravity
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
@@ -13,6 +16,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.webkit.WebViewCompat
@@ -25,15 +29,37 @@ object Ua {
 
 class MainActivity : Activity() {
     private lateinit var web: WebView
+    private lateinit var root: FrameLayout
+    private var pop: WebView? = null
     private var chooser: ValueCallback<Array<Uri>>? = null
     private var js = ""
     private var hasDs = false
+
+    private fun closePopup() {
+        pop?.let { root.removeView(it); it.destroy() }
+        pop = null
+    }
+
+    private fun openUrlDialog() {
+        val et = EditText(this)
+        val cm = getSystemService(ClipboardManager::class.java)
+        et.setText(cm.primaryClip?.getItemAt(0)?.text ?: "")
+        AlertDialog.Builder(this)
+            .setTitle("Open link")
+            .setView(et)
+            .setPositiveButton("Open") { _, _ ->
+                val u = et.text.toString().trim()
+                if (u.startsWith("http")) web.loadUrl(u)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         web = WebView(this)
-        val root = FrameLayout(this)
+        root = FrameLayout(this)
         root.addView(web, FrameLayout.LayoutParams(-1, -1))
         val d = resources.displayMetrics.density
         val btn = TextView(this).apply {
@@ -43,6 +69,7 @@ class MainActivity : Activity() {
             alpha = 0.55f
             setBackgroundColor(0xAA000000.toInt())
             setOnClickListener { startActivity(Intent(this@MainActivity, OverlayActivity::class.java)) }
+            setOnLongClickListener { openUrlDialog(); true }
         }
         root.addView(
             btn,
@@ -54,6 +81,8 @@ class MainActivity : Activity() {
             domStorageEnabled = true
             databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
+            setSupportMultipleWindows(true)
+            javaScriptCanOpenWindowsAutomatically = true
             userAgentString = Ua.clean(userAgentString)
         }
         CookieManager.getInstance().apply {
@@ -85,6 +114,28 @@ class MainActivity : Activity() {
                 return try { startActivityForResult(p.createIntent(), 7); true }
                 catch (e: Exception) { chooser = null; false }
             }
+
+            override fun onCreateWindow(
+                v: WebView?, dialog: Boolean, user: Boolean, msg: Message?
+            ): Boolean {
+                if (msg == null) return false
+                closePopup()
+                val w = WebView(this@MainActivity)
+                w.settings.javaScriptEnabled = true
+                w.settings.domStorageEnabled = true
+                w.settings.javaScriptCanOpenWindowsAutomatically = true
+                w.settings.userAgentString = Ua.clean(w.settings.userAgentString)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
+                w.webViewClient = WebViewClient()
+                w.webChromeClient = object : WebChromeClient() {
+                    override fun onCloseWindow(x: WebView?) { closePopup() }
+                }
+                root.addView(w, FrameLayout.LayoutParams(-1, -1))
+                pop = w
+                (msg.obj as WebView.WebViewTransport).webView = w
+                msg.sendToTarget()
+                return true
+            }
         }
         if (b == null) web.loadUrl("https://claude.ai")
     }
@@ -98,7 +149,9 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (web.canGoBack()) web.goBack() else super.onBackPressed()
+        if (pop != null) closePopup()
+        else if (web.canGoBack()) web.goBack()
+        else super.onBackPressed()
     }
 
     override fun onPause() {
