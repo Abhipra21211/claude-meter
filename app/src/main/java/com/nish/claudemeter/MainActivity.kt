@@ -6,13 +6,15 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
-import android.view.ViewGroup
+import android.view.Gravity
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 
@@ -31,7 +33,22 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         web = WebView(this)
-        setContentView(web, ViewGroup.LayoutParams(-1, -1))
+        val root = FrameLayout(this)
+        root.addView(web, FrameLayout.LayoutParams(-1, -1))
+        val d = resources.displayMetrics.density
+        val btn = TextView(this).apply {
+            text = "📊"
+            textSize = 16f
+            gravity = Gravity.CENTER
+            alpha = 0.55f
+            setBackgroundColor(0xAA000000.toInt())
+            setOnClickListener { startActivity(Intent(this@MainActivity, OverlayActivity::class.java)) }
+        }
+        root.addView(
+            btn,
+            FrameLayout.LayoutParams((40 * d).toInt(), (40 * d).toInt(), Gravity.END or Gravity.CENTER_VERTICAL)
+        )
+        setContentView(root)
         web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true

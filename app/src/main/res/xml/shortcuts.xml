@@ -1,0 +1,12 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="meter"
+        android:enabled="true"
+        android:shortcutShortLabel="@string/meter"
+        android:shortcutLongLabel="@string/meter">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.nish.claudemeter"
+            android:targetClass="com.nish.claudemeter.OverlayActivity" />
+    </shortcut>
+</shortcuts>
