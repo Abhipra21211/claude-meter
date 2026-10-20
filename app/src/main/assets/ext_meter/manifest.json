@@ -1,0 +1,21 @@
+{
+  "manifest_version": 2,
+  "name": "Claude Meter",
+  "version": "1.0",
+  "browser_specific_settings": { "gecko": { "id": "meter@claudemeter.local" } },
+  "permissions": [
+    "https://claude.ai/*",
+    "cookies",
+    "nativeMessaging",
+    "nativeMessagingFromContent",
+    "geckoViewAddons"
+  ],
+  "background": { "scripts": ["bg.js"], "persistent": true },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["hud.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

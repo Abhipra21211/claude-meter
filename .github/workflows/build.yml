@@ -17,13 +17,24 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.9
-      - name: Fetch latest claude-counter script
+      - name: Fetch claude-counter and GeckoView version
         run: |
-          curl -fsSL https://raw.githubusercontent.com/she-llac/claude-counter/main/userscript/claude-counter.user.js -o app/src/main/assets/counter.user.js
-          test -s app/src/main/assets/counter.user.js
+          D=app/src/main/assets/ext_counter
+          curl -fsSL https://raw.githubusercontent.com/she-llac/claude-counter/main/userscript/claude-counter.user.js -o $D/counter.user.js
+          test -s $D/counter.user.js
+          cp app/src/main/assets/shim.js $D/shim.js
           echo "GM APIs used:"
-          grep -oE 'GM_[A-Za-z]+|GM\.[A-Za-z]+' app/src/main/assets/counter.user.js | sort -u || true
-      - run: gradle assembleDebug --no-daemon
+          grep -oE 'GM_[A-Za-z]+|GM\.[A-Za-z]+' $D/counter.user.js | sort -u || true
+          ART=""
+          for A in geckoview geckoview-omni; do
+            if curl -fsSL https://maven.mozilla.org/maven2/org/mozilla/geckoview/$A/maven-metadata.xml -o gv.xml; then ART=$A; break; fi
+          done
+          test -n "$ART"
+          GV=$(grep -oE '<version>[^<]+</version>' gv.xml | tail -1 | sed -E 's/<[^>]+>//g')
+          echo "GeckoView: $ART $GV"
+          echo "GVA=$ART" >> $GITHUB_ENV
+          echo "GV=$GV" >> $GITHUB_ENV
+      - run: gradle assembleDebug --no-daemon -Pgv=$GV -Pgva=$GVA
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: latest

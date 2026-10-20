@@ -1,6 +1,8 @@
 package com.nish.claudemeter
 
 import android.app.Activity
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -89,7 +91,12 @@ class OverlayActivity : Activity() {
             )
             Toast.makeText(this, "Allow overlay, then tap the chart button again", Toast.LENGTH_LONG).show()
         } else {
-            startForegroundService(Intent(this, MeterService::class.java))
+            if (UsageStore.hasUsageAccess(this)) {
+                startForegroundService(Intent(this, MeterService::class.java))
+            } else {
+                Toast.makeText(this, "Allow usage access for Claude Meter, then tap the chart button again", Toast.LENGTH_LONG).show()
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            }
         }
         finish()
     }
@@ -105,7 +112,6 @@ class MeterService : Service() {
     private var body: LinearLayout? = null
     private var noteTv: TextView? = null
     private var bg: GradientDrawable? = null
-    private var web: WebView? = null
     private lateinit var sp: SharedPreferences
     private val rows = LinkedHashMap<String, Row>()
     private val data = LinkedHashMap<String, Pair<Double, Long>>()
@@ -117,13 +123,14 @@ class MeterService : Service() {
         override fun run() { update(); h.postDelayed(this, 1000) }
     }
     private val loop = object : Runnable {
-        override fun run() { poll(); h.postDelayed(this, 60000) }
+        override fun run() { poll(); h.postDelayed(this, 5000) }
     }
 
     override fun onBind(i: Intent?): IBinder? = null
 
     override fun onStartCommand(i: Intent?, f: Int, id: Int): Int {
         fg()
+        Gecko.runtime(this)
         if (panel != null) { stopSelf(); return START_NOT_STICKY }
         build()
         load()
@@ -137,7 +144,6 @@ class MeterService : Service() {
     override fun onDestroy() {
         h.removeCallbacksAndMessages(null)
         try { wm?.removeView(panel) } catch (e: Exception) {}
-        web?.destroy()
         super.onDestroy()
     }
 
@@ -220,16 +226,6 @@ class MeterService : Service() {
             true
         }
         wm?.addView(pn, p)
-        web = WebView(applicationContext).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.userAgentString = Ua.clean(settings.userAgentString)
-            webViewClient = object : WebViewClient() {
-                override fun onPageFinished(v: WebView, u: String) {
-                    if (u.contains("/usage")) v.evaluateJavascript("document.body.innerText") { parse(it) }
-                }
-            }
-        }
     }
 
     private fun toggle() {
@@ -238,12 +234,12 @@ class MeterService : Service() {
         update()
     }
 
+    private var seen = 0L
+
     private fun poll() {
-        val ck = CookieManager.getInstance().getCookie("https://claude.ai") ?: ""
-        val org = ck.split(";").map { it.trim() }
-            .firstOrNull { it.startsWith("lastActiveOrg=") }?.substringAfter("=")
-        if (org.isNullOrEmpty()) { note = "sign in via Claude Web first"; update(); return }
-        web?.loadUrl("https://claude.ai/api/organizations/$org/usage")
+        val s = UsageStore.json
+        if (s == null) { note = "open Claude Browser and sign in"; update(); return }
+        if (UsageStore.stamp != seen) { seen = UsageStore.stamp; parse(s) } else update()
     }
 
     private fun parse(raw: String?) {
@@ -370,7 +366,29 @@ class MeterService : Service() {
         ).joinToString(" · ")
     }
 
+    private var fgPkg: String? = null
+    private var fgFrom = 0L
+
+    private fun applyVisibility() {
+        val pn = panel ?: return
+        if (!UsageStore.hasUsageAccess(this)) { pn.visibility = View.VISIBLE; return }
+        val now = System.currentTimeMillis()
+        if (fgFrom == 0L) fgFrom = now - 2 * 3600000
+        try {
+            val um = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val ev = um.queryEvents(fgFrom, now)
+            val e = UsageEvents.Event()
+            while (ev.hasNextEvent()) {
+                ev.getNextEvent(e)
+                if (e.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) fgPkg = e.packageName
+            }
+            fgFrom = now
+        } catch (ex: Exception) {}
+        pn.visibility = if (fgPkg == "com.anthropic.claude") View.VISIBLE else View.GONE
+    }
+
     private fun update() {
+        applyVisibility()
         val now = System.currentTimeMillis()
         var worst = 0.0
         for ((k, v) in data) {
