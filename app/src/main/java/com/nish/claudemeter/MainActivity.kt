@@ -1,6 +1,7 @@
 package com.nish.claudemeter
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -21,40 +22,58 @@ import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.WebExtension
+import org.mozilla.geckoview.WebExtensionController
 
 object Gecko {
     private var rt: GeckoRuntime? = null
+
+    private fun ext(
+        ctl: WebExtensionController, c: Context, key: String, dflt: Boolean,
+        id: String, path: String, onReady: (WebExtension) -> Unit
+    ) {
+        val on = c.getSharedPreferences("ext", Context.MODE_PRIVATE).getBoolean(key, dflt)
+        if (on) {
+            ctl.ensureBuiltIn(path, id).accept({ e ->
+                if (e != null) onReady(e)
+                null
+            }, { e -> Log.e("Meter", "$id failed", e); null })
+        } else {
+            ctl.list().accept({ list ->
+                list?.filter { it.id == id }?.forEach { ctl.uninstall(it) }
+                null
+            }, { e -> Log.e("Meter", "list failed", e); null })
+        }
+    }
 
     fun runtime(c: Context): GeckoRuntime {
         rt?.let { return it }
         val r = GeckoRuntime.create(c.applicationContext)
         rt = r
         val ctl = r.webExtensionController
-        ctl.ensureBuiltIn("resource://android/assets/ext_counter/", "counter@claudemeter.local")
-            .accept({ _ -> null }, { e -> Log.e("Meter", "counter ext failed", e); null })
-        ctl.ensureBuiltIn("resource://android/assets/ext_meter/", "meter@claudemeter.local")
-            .accept({ ext ->
-                ext?.setMessageDelegate(object : WebExtension.MessageDelegate {
-                    override fun onMessage(
-                        nativeApp: String,
-                        message: Any,
-                        sender: WebExtension.MessageSender
-                    ): GeckoResult<Any>? {
-                        try {
-                            val m = if (message is JSONObject) message else JSONObject(message.toString())
-                            val u = m.optString("usage", "")
-                            if (u.isNotEmpty()) {
-                                UsageStore.json = u
-                                UsageStore.stamp = System.currentTimeMillis()
-                            }
-                        } catch (e: Exception) {
-                            Log.e("Meter", "bad message", e)
+        ext(ctl, c, "counter", false, "counter@claudemeter.local",
+            "resource://android/assets/ext_counter/") { }
+        ext(ctl, c, "meter", true, "meter@claudemeter.local",
+            "resource://android/assets/ext_meter/") { e ->
+            e.setMessageDelegate(object : WebExtension.MessageDelegate {
+                override fun onMessage(
+                    nativeApp: String,
+                    message: Any,
+                    sender: WebExtension.MessageSender
+                ): GeckoResult<Any>? {
+                    try {
+                        val m = if (message is JSONObject) message else JSONObject(message.toString())
+                        val u = m.optString("usage", "")
+                        if (u.isNotEmpty()) {
+                            UsageStore.json = u
+                            UsageStore.stamp = System.currentTimeMillis()
                         }
-                        return null
+                    } catch (ex: Exception) {
+                        Log.e("Meter", "bad message", ex)
                     }
-                }, "browser")
-                null
-            }, { e -> Log.e("Meter", "meter ext failed", e); null })
+                    return null
+                }
+            }, "browser")
+        }
         return r
     }
 }
@@ -158,7 +177,7 @@ class MainActivity : Activity() {
             alpha = 0.55f
             setBackgroundColor(0xAA000000.toInt())
             setOnClickListener { startActivity(Intent(this@MainActivity, OverlayActivity::class.java)) }
-            setOnLongClickListener { openClip(); true }
+            setOnLongClickListener { menu(); true }
         }
         root.addView(
             btn,
@@ -172,6 +191,33 @@ class MainActivity : Activity() {
         view.setSession(session)
         val start = intent?.data
         session.loadUri(if (start != null && allowed(start)) start.toString() else "https://claude.ai")
+    }
+
+    private fun menu() {
+        val sp = getSharedPreferences("ext", MODE_PRIVATE)
+        val cOn = sp.getBoolean("counter", false)
+        val mOn = sp.getBoolean("meter", true)
+        val items = arrayOf(
+            "Open copied link",
+            "Reload page",
+            "she-llac counter: " + (if (cOn) "ON" else "OFF") + " (tap to switch)",
+            "Meter panel: " + (if (mOn) "ON" else "OFF") + " (tap to switch)"
+        )
+        AlertDialog.Builder(this).setItems(items) { _, w ->
+            when (w) {
+                0 -> openClip()
+                1 -> session.reload()
+                2 -> { sp.edit().putBoolean("counter", !cOn).apply(); restart() }
+                3 -> { sp.edit().putBoolean("meter", !mOn).apply(); restart() }
+            }
+        }.show()
+    }
+
+    private fun restart() {
+        val i = Intent(this, MainActivity::class.java)
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        startActivity(i)
+        ui.postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 400)
     }
 
     private fun openClip() {
@@ -215,3 +261,4 @@ class MainActivity : Activity() {
         else super.onBackPressed()
     }
 }
+// END
