@@ -89,6 +89,9 @@ class OverlayActivity : Activity() {
         } else if (!UsageStore.hasUsageAccess(this)) {
             Toast.makeText(this, "Allow usage access for Claude Meter, then tap the chart button again", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        } else if (!UsageStore.readerEnabled(this)) {
+            Toast.makeText(this, "Turn on Claude Meter reader in Accessibility, then tap the chart button again", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         } else {
             startForegroundService(Intent(this, MeterService::class.java))
         }
@@ -233,7 +236,7 @@ class MeterService : Service() {
 
     private fun poll() {
         val s = UsageStore.json
-        if (s == null) { note = "open Claude Browser and sign in"; update(); return }
+        if (s == null) { note = "open Claude app > Settings > Usage once"; update(); return }
         if (UsageStore.stamp != seen) { seen = UsageStore.stamp; parse(s, seen) } else update()
     }
 
@@ -405,8 +408,9 @@ class MeterService : Service() {
         age?.text = if (stamp > 0) ago(now - stamp) else ""
         title?.text = if (collapsed) "Meter  " + sum() else "Claude Meter  ▾"
         body?.visibility = if (collapsed) View.GONE else View.VISIBLE
-        noteTv?.text = note
-        noteTv?.visibility = if (note.isEmpty()) View.GONE else View.VISIBLE
+        val shown = if (note.isNotEmpty()) note else if (stamp > 0 && now - stamp > 15 * 60000) "stale - open Settings > Usage in Claude" else ""
+        noteTv?.text = shown
+        noteTv?.visibility = if (shown.isEmpty()) View.GONE else View.VISIBLE
     }
 }
 // END

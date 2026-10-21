@@ -1,3 +1,4 @@
 <resources>
     <string name="meter">Meter Overlay</string>
+    <string name="reader_desc">Reads the usage percentages shown inside the Claude app so the Claude Meter overlay can display them. Nothing else is read or stored.</string>
 </resources>
