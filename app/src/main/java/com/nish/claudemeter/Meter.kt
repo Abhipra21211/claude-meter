@@ -1,12 +1,12 @@
 package com.nish.claudemeter
 
 import android.app.Activity
-import android.app.usage.UsageEvents
-import android.app.usage.UsageStatsManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -27,14 +27,10 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.webkit.CookieManager
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONObject
-import org.json.JSONTokener
 import java.time.OffsetDateTime
 import kotlin.math.abs
 import kotlin.math.max
@@ -90,13 +86,11 @@ class OverlayActivity : Activity() {
                 Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
             )
             Toast.makeText(this, "Allow overlay, then tap the chart button again", Toast.LENGTH_LONG).show()
+        } else if (!UsageStore.hasUsageAccess(this)) {
+            Toast.makeText(this, "Allow usage access for Claude Meter, then tap the chart button again", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
         } else {
-            if (UsageStore.hasUsageAccess(this)) {
-                startForegroundService(Intent(this, MeterService::class.java))
-            } else {
-                Toast.makeText(this, "Allow usage access for Claude Meter, then tap the chart button again", Toast.LENGTH_LONG).show()
-                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-            }
+            startForegroundService(Intent(this, MeterService::class.java))
         }
         finish()
     }
@@ -117,7 +111,10 @@ class MeterService : Service() {
     private val data = LinkedHashMap<String, Pair<Double, Long>>()
     private var note = ""
     private var stamp = 0L
+    private var seen = 0L
     private var collapsed = false
+    private var fgPkg: String? = null
+    private var fgFrom = 0L
 
     private val tick = object : Runnable {
         override fun run() { update(); h.postDelayed(this, 1000) }
@@ -234,17 +231,13 @@ class MeterService : Service() {
         update()
     }
 
-    private var seen = 0L
-
     private fun poll() {
         val s = UsageStore.json
         if (s == null) { note = "open Claude Browser and sign in"; update(); return }
-        if (UsageStore.stamp != seen) { seen = UsageStore.stamp; parse(s) } else update()
+        if (UsageStore.stamp != seen) { seen = UsageStore.stamp; parse(s, seen) } else update()
     }
 
-    private fun parse(raw: String?) {
-        val s = try { JSONTokener(raw ?: "null").nextValue() as? String } catch (e: Exception) { null }
-        if (s == null) { note = "no reply - tap to retry"; update(); return }
+    private fun parse(s: String, ts: Long) {
         val o = try { JSONObject(s) } catch (e: Exception) {
             note = "not signed in? got: " + s.take(70).replace("\n", " ")
             update(); return
@@ -259,7 +252,7 @@ class MeterService : Service() {
         data.clear()
         data.putAll(fresh)
         note = ""
-        stamp = System.currentTimeMillis()
+        stamp = ts
         save(); alerts(); sync(); update()
     }
 
@@ -366,9 +359,6 @@ class MeterService : Service() {
         ).joinToString(" · ")
     }
 
-    private var fgPkg: String? = null
-    private var fgFrom = 0L
-
     private fun applyVisibility() {
         val pn = panel ?: return
         if (!UsageStore.hasUsageAccess(this)) { pn.visibility = View.VISIBLE; return }
@@ -419,3 +409,4 @@ class MeterService : Service() {
         noteTv?.visibility = if (note.isEmpty()) View.GONE else View.VISIBLE
     }
 }
+// END
